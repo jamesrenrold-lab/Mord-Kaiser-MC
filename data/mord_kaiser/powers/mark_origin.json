@@ -1,5 +1,7 @@
 {
   "type": "origins:action_over_time",
+  "name": "§8Iron Revenant",
+  "description": "Marks this player for the Mord-Kaiser companion mechanics.",
   "interval": 20,
   "entity_action": {
     "type": "origins:execute_command",
