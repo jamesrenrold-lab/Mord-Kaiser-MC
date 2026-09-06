@@ -1,0 +1,14 @@
+{
+  "type": "origins:resource",
+  "name": "§5Soul Charge",
+  "description": "Damage dealt fills this bar. Full charge requires damage equal to twice your maximum health.",
+  "min": 0,
+  "max": 100,
+  "start_value": 0,
+  "hud_render": {
+    "should_render": true,
+    "sprite_location": "minecraft:textures/item/nether_star.png",
+    "bar_index": 0,
+    "icon_index": 0
+  }
+}
