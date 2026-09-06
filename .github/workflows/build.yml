@@ -1,0 +1,36 @@
+name: Build Mord-Kaiser Origin
+
+on:
+  push:
+    branches: [ feature/mordekaiser-origin ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+      - name: Build companion mod
+        run: gradle build
+      - name: Package datapack
+        run: |
+          mkdir -p build/datapack
+          zip -r build/datapack/mord_kaiser_origin.zip pack.mcmeta data
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mord-kaiser-origin
+          path: |
+            build/libs/mord_kaiser-*.jar
+            build/datapack/mord_kaiser_origin.zip
+          if-no-files-found: error
