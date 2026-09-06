@@ -7,7 +7,7 @@
   "start_value": 0,
   "hud_render": {
     "should_render": true,
-    "sprite_location": "minecraft:textures/item/netherite_sword.png",
+    "sprite_location": "mord_kaiser:textures/gui/mace_of_spades.png",
     "bar_index": 1,
     "icon_index": 0
   }
