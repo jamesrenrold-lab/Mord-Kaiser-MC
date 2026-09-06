@@ -3,6 +3,8 @@ package com.jamesrenrold.mordkaiser;
 import io.redspace.ironsspellbooks.api.registry.AttributeRegistry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -12,6 +14,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -24,6 +27,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.UUID;
+import org.joml.Vector3f;
 
 @Mod(MordKaiserCompanion.MOD_ID)
 public final class MordKaiserCompanion {
@@ -33,6 +37,7 @@ public final class MordKaiserCompanion {
     private static final String SOUL_DAMAGE = "MordSoulDamage";
     private static final String SOUL_HUD = "MordSoulHud";
     private static final String MACE_CHARGES = "MordMaceCharges";
+    private static final String MACE_COOLDOWN = "MordMaceCooldown";
     private static final String SHIELD_COOLDOWN = "MordShieldCooldown";
     private static final String METAL_UNTIL = "MordMetalUntil";
     private static final String METAL_COOLDOWN = "MordMetalCooldown";
@@ -40,6 +45,7 @@ public final class MordKaiserCompanion {
     private static final int SOUL_RESOURCE_MAX = 100;
     private static final int MACE_MAX = 3;
     private static final long SHIELD_COOLDOWN_TICKS = 240L;
+    private static final long MACE_COOLDOWN_TICKS = 200L;
     private static final long METAL_DURATION_TICKS = 300L;
     private static final long METAL_COOLDOWN_TICKS = 900L;
     private static final double METAL_RADIUS = 3.0D;
@@ -65,12 +71,15 @@ public final class MordKaiserCompanion {
 
     @SubscribeEvent
     public void onLivingHurt(LivingHurtEvent event) {
-        Entity attacker = event.getSource().getEntity();
-        if (!(attacker instanceof ServerPlayer player) || !isMord(player) || event.getEntity() == player) return;
+        // Resolve the player through a spell projectile's owner as well as direct
+        // melee sources, so Soul Charge fills from both weapon and spell damage.
+        ServerPlayer player = resolvePlayer(event.getSource().getEntity());
+        if (player == null) player = resolvePlayer(event.getSource().getDirectEntity());
+        if (player == null || !isMord(player) || event.getEntity() == player || event.getAmount() <= 0.0F) return;
 
         // Mace of Spades counts successful melee hits only: both source entities
         // must be the player, excluding projectiles and spell entities.
-        if (event.getSource().getDirectEntity() == player) {
+        if (event.getSource().getEntity() == player && event.getSource().getDirectEntity() == player) {
             int charges = getData(player).getInt(MACE_CHARGES);
             if (charges > 0) {
                 double spellPower = getSpellPower(player);
@@ -78,7 +87,9 @@ public final class MordKaiserCompanion {
                 charges--;
                 getData(player).putInt(MACE_CHARGES, charges);
                 syncMaceResource(player, charges);
+                showMaceBurst(player, event.getEntity());
                 if (charges == 0) {
+                    getData(player).putLong(MACE_COOLDOWN, player.serverLevel().getGameTime() + MACE_COOLDOWN_TICKS);
                     player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 300, 0, false, true, true));
                     player.addEffect(new MobEffectInstance(MobEffects.DAMAGE_BOOST, 300, 0, false, true, true));
                     player.displayClientMessage(Component.literal("Mace of Spades completed: Speed I and Strength I.")
@@ -87,9 +98,7 @@ public final class MordKaiserCompanion {
             }
         }
 
-        if (event.getAmount() > 0.0F) {
-            addSoulDamage(player, event.getAmount());
-        }
+        addSoulDamage(player, event.getAmount());
     }
 
     @SubscribeEvent
@@ -153,6 +162,12 @@ public final class MordKaiserCompanion {
                     .withStyle(ChatFormatting.DARK_RED), true);
             return 0;
         }
+        if (data.getLong(MACE_COOLDOWN) > player.serverLevel().getGameTime()) {
+            long remaining = data.getLong(MACE_COOLDOWN) - player.serverLevel().getGameTime();
+            player.displayClientMessage(Component.literal("Mace of Spades is cooling down (" + ((remaining + 19L) / 20L) + "s).")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
         data.putInt(MACE_CHARGES, MACE_MAX);
         syncMaceResource(player, MACE_MAX);
         player.displayClientMessage(Component.literal("Mace of Spades armed: land three melee hits.")
@@ -205,9 +220,29 @@ public final class MordKaiserCompanion {
                 player.createCommandSourceStack().withPermission(2).withSuppressedOutput(), command);
     }
 
+    private static ServerPlayer resolvePlayer(Entity entity) {
+        if (entity instanceof ServerPlayer player) return player;
+        if (entity instanceof Projectile projectile && projectile.getOwner() != entity) {
+            return resolvePlayer(projectile.getOwner());
+        }
+        return null;
+    }
+
     private static double getSpellPower(ServerPlayer player) {
         AttributeInstance attribute = player.getAttribute(AttributeRegistry.SPELL_POWER.get());
         return attribute == null ? 0.0D : Math.max(0.0D, attribute.getValue());
+    }
+
+    private static void showMaceBurst(ServerPlayer player, LivingEntity target) {
+        ServerLevel level = player.serverLevel();
+        double x = target.getX();
+        double y = target.getY() + target.getBbHeight() * 0.55D;
+        double z = target.getZ();
+        level.sendParticles(new DustParticleOptions(new Vector3f(0.02F, 0.28F, 0.08F), 1.4F),
+                x, y, z, 22, 0.45D, 0.45D, 0.45D, 0.08D);
+        level.sendParticles(new DustParticleOptions(new Vector3f(0.0F, 0.85F, 1.0F), 1.2F),
+                x, y, z, 18, 0.55D, 0.55D, 0.55D, 0.10D);
+        level.sendParticles(ParticleTypes.EXPLOSION, x, y, z, 1, 0.0D, 0.0D, 0.0D, 0.0D);
     }
 
     private static void applyMetalAura(ServerPlayer player) {
@@ -219,8 +254,24 @@ public final class MordKaiserCompanion {
                 entity -> entity != player && entity.isAlive() && !player.isAlliedTo(entity))) {
             target.hurt(level.damageSources().generic(), damage);
         }
-        level.sendParticles(net.minecraft.core.particles.ParticleTypes.CRIT,
-                player.getX(), player.getY() + 1.0D, player.getZ(), 8, 0.7D, 0.6D, 0.7D, 0.0D);
+        showMetalRing(level, player);
+    }
+
+    private static void showMetalRing(ServerLevel level, ServerPlayer player) {
+        DustParticleOptions cyan = new DustParticleOptions(new Vector3f(0.0F, 0.85F, 1.0F), 1.0F);
+        double y = player.getY() + 0.08D;
+        for (int i = 0; i < 32; i++) {
+            double angle = (Math.PI * 2.0D * i) / 32.0D;
+            double x = player.getX() + Math.cos(angle) * METAL_RADIUS;
+            double z = player.getZ() + Math.sin(angle) * METAL_RADIUS;
+            level.sendParticles(cyan, x, y, z, 1, 0.0D, 0.02D, 0.0D, 0.0D);
+        }
+        for (int i = 0; i < 10; i++) {
+            double angle = (Math.PI * 2.0D * i) / 10.0D;
+            double radius = 0.45D + (i % 3) * 0.55D;
+            level.sendParticles(cyan, player.getX() + Math.cos(angle) * radius, player.getY() + 0.25D,
+                    player.getZ() + Math.sin(angle) * radius, 1, 0.02D, 0.08D, 0.02D, 0.0D);
+        }
     }
 
     private static void ensureArmorModifiers(ServerPlayer player) {
