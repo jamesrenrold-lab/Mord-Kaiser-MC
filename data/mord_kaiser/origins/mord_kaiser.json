@@ -1,13 +1,14 @@
 {
   "type": "origins:origin",
   "name": "Mord-Kaiser",
-  "description": "A brutal iron revenant who turns dealt damage into a Soul Shield, empowers three melee strikes, and surrounds himself with cutting metal shards.",
+  "description": "A brutal iron revenant. Dealt damage builds Soul Charge; Mace of Spades empowers three melee hits; Metal Shards surrounds him with a damaging field.",
   "icon": {
     "item": "minecraft:netherite_sword"
   },
   "impact": 2,
   "powers": [
     "mord_kaiser:mark_origin",
+    "mord_kaiser:mord_passive",
     "mord_kaiser:soul_charge",
     "mord_kaiser:mace_charges",
     "mord_kaiser:mace_of_spades",
