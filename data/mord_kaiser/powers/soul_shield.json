@@ -1,7 +1,7 @@
 {
   "type": "origins:active_self",
   "name": "§5Soul Shield",
-  "description": "Consume charge to gain absorption. At 33%, 66%, or 100% charge, gain 11%, 22%, or 33% of maximum health as absorption. Cooldown: 12 seconds.",
+  "description": "Consume Soul Charge to gain absorption. Full charge requires damage equal to twice maximum health: 33% charge grants 11% max-health absorption, 66% grants 22%, and 100% grants 33%. Cooldown: 12 seconds.",
   "cooldown": 240,
   "key": {
     "key": "key.origins.secondary_active"
