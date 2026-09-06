@@ -1,0 +1,14 @@
+{
+  "type": "origins:resource",
+  "name": "§8Mace of Spades",
+  "description": "Three melee strikes can be empowered at once.",
+  "min": 0,
+  "max": 3,
+  "start_value": 0,
+  "hud_render": {
+    "should_render": true,
+    "sprite_location": "minecraft:textures/item/netherite_sword.png",
+    "bar_index": 1,
+    "icon_index": 0
+  }
+}
