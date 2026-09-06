@@ -1,0 +1,13 @@
+{
+  "type": "origins:active_self",
+  "name": "§8Mace of Spades",
+  "description": "Arm your next three melee hits. Each hit deals bonus damage equal to 30% of your Spell Power. Landing all three grants Speed I and Strength I for 15 seconds.",
+  "cooldown": 20,
+  "key": {
+    "key": "key.origins.primary_active"
+  },
+  "entity_action": {
+    "type": "origins:execute_command",
+    "command": "mordmace"
+  }
+}
