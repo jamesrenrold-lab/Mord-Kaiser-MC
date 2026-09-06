@@ -38,6 +38,7 @@ public final class MordKaiserCompanion {
     private static final String SOUL_HUD = "MordSoulHud";
     private static final String MACE_CHARGES = "MordMaceCharges";
     private static final String MACE_COOLDOWN = "MordMaceCooldown";
+    private static final String MACE_RECHARGE_START = "MordMaceRechargeStart";
     private static final String SHIELD_COOLDOWN = "MordShieldCooldown";
     private static final String METAL_UNTIL = "MordMetalUntil";
     private static final String METAL_COOLDOWN = "MordMetalCooldown";
@@ -89,7 +90,9 @@ public final class MordKaiserCompanion {
                 syncMaceResource(player, charges);
                 showMaceBurst(player, event.getEntity());
                 if (charges == 0) {
-                    getData(player).putLong(MACE_COOLDOWN, player.serverLevel().getGameTime() + MACE_COOLDOWN_TICKS);
+                    long cooldownStart = player.serverLevel().getGameTime();
+                    getData(player).putLong(MACE_RECHARGE_START, cooldownStart);
+                    getData(player).putLong(MACE_COOLDOWN, cooldownStart + MACE_COOLDOWN_TICKS);
                     player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 300, 0, false, true, true));
                     player.addEffect(new MobEffectInstance(MobEffects.DAMAGE_BOOST, 300, 0, false, true, true));
                     player.displayClientMessage(Component.literal("Mace of Spades completed: Speed I and Strength I.")
@@ -111,6 +114,7 @@ public final class MordKaiserCompanion {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (!isMord(player)) continue;
             syncSoulResource(player);
+            syncMaceRecharge(player, now);
             long metalUntil = getData(player).getLong(METAL_UNTIL);
             if (metalUntil > now) {
                 ensureArmorModifiers(player);
@@ -208,6 +212,34 @@ public final class MordKaiserCompanion {
         if (data.getInt(SOUL_HUD) == value) return;
         data.putInt(SOUL_HUD, value);
         runResourceCommand(player, "mord_kaiser:soul_charge", value);
+    }
+
+    private static void syncMaceRecharge(ServerPlayer player, long now) {
+        var data = getData(player);
+        long cooldownEnd = data.getLong(MACE_COOLDOWN);
+        int current = Math.max(0, Math.min(MACE_MAX, data.getInt(MACE_CHARGES)));
+        if (cooldownEnd <= 0L || current >= MACE_MAX) return;
+
+        long rechargeStart = data.getLong(MACE_RECHARGE_START);
+        if (rechargeStart <= 0L) {
+            rechargeStart = Math.max(0L, cooldownEnd - MACE_COOLDOWN_TICKS);
+            data.putLong(MACE_RECHARGE_START, rechargeStart);
+        }
+
+        if (now >= cooldownEnd) {
+            data.putInt(MACE_CHARGES, MACE_MAX);
+            data.putLong(MACE_COOLDOWN, 0L);
+            data.putLong(MACE_RECHARGE_START, 0L);
+            syncMaceResource(player, MACE_MAX);
+            return;
+        }
+
+        long elapsed = Math.max(0L, Math.min(MACE_COOLDOWN_TICKS, now - rechargeStart));
+        int recharged = Math.min(MACE_MAX, (int) ((elapsed * MACE_MAX) / MACE_COOLDOWN_TICKS));
+        if (recharged != current) {
+            data.putInt(MACE_CHARGES, recharged);
+            syncMaceResource(player, recharged);
+        }
     }
 
     private static void syncMaceResource(ServerPlayer player, int value) {
