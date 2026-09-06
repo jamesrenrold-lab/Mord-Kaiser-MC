@@ -37,6 +37,7 @@ public final class MordKaiserCompanion {
     private static final String SOUL_DAMAGE = "MordSoulDamage";
     private static final String SOUL_HUD = "MordSoulHud";
     private static final String MACE_CHARGES = "MordMaceCharges";
+    private static final String MACE_HUD = "MordMaceHud";
     private static final String MACE_COOLDOWN = "MordMaceCooldown";
     private static final String MACE_RECHARGE_START = "MordMaceRechargeStart";
     private static final String SHIELD_COOLDOWN = "MordShieldCooldown";
@@ -217,8 +218,7 @@ public final class MordKaiserCompanion {
     private static void syncMaceRecharge(ServerPlayer player, long now) {
         var data = getData(player);
         long cooldownEnd = data.getLong(MACE_COOLDOWN);
-        int current = Math.max(0, Math.min(MACE_MAX, data.getInt(MACE_CHARGES)));
-        if (cooldownEnd <= 0L || current >= MACE_MAX) return;
+        if (cooldownEnd <= 0L) return;
 
         long rechargeStart = data.getLong(MACE_RECHARGE_START);
         if (rechargeStart <= 0L) {
@@ -234,15 +234,18 @@ public final class MordKaiserCompanion {
             return;
         }
 
+        // During cooldown the HUD fills visually, but the charges remain locked
+        // at zero until the full cooldown is complete.
         long elapsed = Math.max(0L, Math.min(MACE_COOLDOWN_TICKS, now - rechargeStart));
-        int recharged = Math.min(MACE_MAX, (int) ((elapsed * MACE_MAX) / MACE_COOLDOWN_TICKS));
-        if (recharged != current) {
-            data.putInt(MACE_CHARGES, recharged);
-            syncMaceResource(player, recharged);
+        int visual = Math.min(MACE_MAX, (int) ((elapsed * MACE_MAX) / MACE_COOLDOWN_TICKS));
+        if (data.getInt(MACE_HUD) != visual) {
+            syncMaceResource(player, visual);
         }
     }
 
     private static void syncMaceResource(ServerPlayer player, int value) {
+        var data = getData(player);
+        data.putInt(MACE_HUD, Math.max(0, Math.min(MACE_MAX, value)));
         runResourceCommand(player, "mord_kaiser:mace_charges", Math.max(0, Math.min(MACE_MAX, value)));
     }
 
