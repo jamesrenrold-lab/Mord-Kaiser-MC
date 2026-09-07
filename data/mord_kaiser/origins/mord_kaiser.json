@@ -1,7 +1,7 @@
 {
   "type": "origins:origin",
   "name": "Mord-Kaiser",
-  "description": "A brutal iron revenant. Dealt damage builds Soul Charge; Mace of Spades empowers three melee hits; Metal Shards surrounds him with a damaging field; Death's Grasp pulls enemies inward, and Indestructible converts absorption into sustain.",
+  "description": "A brutal iron revenant. Dealt damage builds Soul Charge; Mace of Spades empowers three melee hits; Metal Shards surrounds him with a damaging field; Death's Grasp pulls enemies inward; Indestructible converts all absorption into sustain; Realm of Death isolates one enemy for a one-minute duel.",
   "icon": {
     "item": "minecraft:netherite_sword"
   },
@@ -15,6 +15,7 @@
     "mord_kaiser:soul_shield",
     "mord_kaiser:metal_shards",
     "mord_kaiser:death_grasp",
-    "mord_kaiser:indestructible"
+    "mord_kaiser:indestructible",
+    "mord_kaiser:realm_of_death"
   ]
 }
