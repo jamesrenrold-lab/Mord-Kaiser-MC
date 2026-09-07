@@ -3,6 +3,7 @@ package com.jamesrenrold.mordkaiser;
 import io.redspace.ironsspellbooks.api.registry.AttributeRegistry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -13,6 +14,7 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -44,6 +46,10 @@ import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -83,6 +89,8 @@ public final class MordKaiserCompanion {
             ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
     private static final int DOMAIN_DURATION_TICKS = 20 * 60;
     private static final int DOMAIN_WINDUP_TICKS = 23;
+    // The uploaded track is 18.192 seconds; restart it every 364 ticks while inside.
+    private static final int DOMAIN_SOUND_PERIOD_TICKS = 364;
     private static final double DOMAIN_TARGET_RANGE = 40.0D;
     private static final double ARENA_SPACING = 160.0D;
     private static final int ARENA_HALF_SIZE = 24;
@@ -97,8 +105,14 @@ public final class MordKaiserCompanion {
     private static final UUID DOMAIN_HEALTH_ID = UUID.fromString("1d7c4e91-2ac0-4a5f-8e7d-0b8b9f3a5205");
     private static final Map<UUID, PendingDomain> PENDING_DOMAINS = new HashMap<>();
     private static final Map<UUID, DomainSession> DOMAIN_SESSIONS = new HashMap<>();
+    private static final DeferredRegister<SoundEvent> SOUND_EVENTS =
+            DeferredRegister.create(ForgeRegistries.SOUND_EVENTS, MOD_ID);
+    private static final RegistryObject<SoundEvent> REALM_OF_DEATH_LOOP = SOUND_EVENTS.register(
+            "realm_of_death_loop",
+            () -> SoundEvent.createVariableRangeEvent(new ResourceLocation(MOD_ID, "realm_of_death_loop")));
 
     public MordKaiserCompanion() {
+        SOUND_EVENTS.register(FMLJavaModLoadingContext.get().getModEventBus());
         MinecraftForge.EVENT_BUS.register(this);
     }
 
@@ -144,6 +158,7 @@ public final class MordKaiserCompanion {
         final int arenaFloorTop;
         LivingEntity target;
         int ticksRemaining = DOMAIN_DURATION_TICKS;
+        int soundTicksUntilNext = DOMAIN_SOUND_PERIOD_TICKS;
         int lastDisplayedSecond = Integer.MIN_VALUE;
 
         DomainSession(UUID playerId, UUID targetId, SavedLocation playerOrigin, SavedLocation targetOrigin,
@@ -244,6 +259,11 @@ public final class MordKaiserCompanion {
         if (session.ticksRemaining % 20 == 0) {
             target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 40, 0, false, true, true));
         }
+        session.soundTicksUntilNext--;
+        if (session.soundTicksUntilNext <= 0) {
+            playDomainLoop(player);
+            session.soundTicksUntilNext = DOMAIN_SOUND_PERIOD_TICKS;
+        }
         updateDomainCountdown(player, session);
         session.ticksRemaining--;
         if (session.ticksRemaining <= 0) {
@@ -266,6 +286,7 @@ public final class MordKaiserCompanion {
         DomainSession session = DOMAIN_SESSIONS.remove(player.getUUID());
         if (session == null) return;
 
+        stopDomainLoop(player);
         removeDomainModifiers(player);
         MinecraftServer server = player.getServer();
         if (server == null) return;
@@ -394,6 +415,7 @@ public final class MordKaiserCompanion {
         DOMAIN_SESSIONS.put(player.getUUID(), session);
         player.teleportTo(domain, arenaX, arenaY, -7.0D, 0.0F, 0.0F);
         player.setDeltaMovement(Vec3.ZERO);
+        playDomainLoop(player);
         domain.playSound(null, player.blockPosition(), SoundEvents.END_PORTAL_SPAWN,
                 SoundSource.PLAYERS, 0.8F, 1.1F);
         updateDomainCountdown(player, session);
@@ -495,6 +517,16 @@ public final class MordKaiserCompanion {
     }
 
     private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
+    private static void playDomainLoop(ServerPlayer player) {
+        player.playNotifySound(REALM_OF_DEATH_LOOP.get(), SoundSource.MUSIC, 1.0F, 1.0F);
+    }
+
+    private static void stopDomainLoop(ServerPlayer player) {
+        player.connection.send(new ClientboundStopSoundPacket(
+                REALM_OF_DEATH_LOOP.get().getLocation(), SoundSource.MUSIC));
+    }
+
+    private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
         int seconds = Math.max(0, (session.ticksRemaining + 19) / 20);
         if (seconds == session.lastDisplayedSecond) return;
         session.lastDisplayedSecond = seconds;
@@ -546,6 +578,7 @@ public final class MordKaiserCompanion {
 
     private static void finishDomain(ServerPlayer player, DomainSession session, String message) {
         if (!DOMAIN_SESSIONS.remove(session.playerId, session)) return;
+        stopDomainLoop(player);
         removeDomainModifiers(player);
         MinecraftServer server = player.getServer();
         if (server == null) return;
