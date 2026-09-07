@@ -516,7 +516,6 @@ public final class MordKaiserCompanion {
         }
     }
 
-    private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
     private static void playDomainLoop(ServerPlayer player) {
         player.playNotifySound(REALM_OF_DEATH_LOOP.get(), SoundSource.MUSIC, 1.0F, 1.0F);
     }
