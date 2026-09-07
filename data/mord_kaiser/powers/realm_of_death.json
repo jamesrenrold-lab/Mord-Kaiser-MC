@@ -1,0 +1,19 @@
+{
+  "type": "origins:active_self",
+  "name": "§4Realm of Death",
+  "description": "Aim at a hostile mob within 40 blocks. After a short windup, you and that target are trapped in a separate arena for up to 60 seconds. You gain +20% Spell Power, attack damage, armor, and maximum health, plus +15% attack speed. The enemy has Weakness I.",
+  "cooldown": 40,
+  "hud_render": {
+    "should_render": true,
+    "sprite_location": "mord_kaiser:textures/gui/realm_of_death.png",
+    "bar_index": 0,
+    "icon_index": 0
+  },
+  "key": {
+    "key": "key.origins.senary_active"
+  },
+  "entity_action": {
+    "type": "origins:execute_command",
+    "command": "morddomain"
+  }
+}
