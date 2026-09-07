@@ -56,6 +56,8 @@ public final class MordKaiserCompanion {
     private static final long METAL_COOLDOWN_TICKS = 900L;
     private static final long GRASP_COOLDOWN_TICKS = 260L;
     private static final double METAL_RADIUS = 3.0D;
+    private static final double GRASP_RANGE = 14.0D;
+    private static final double GRASP_RADIUS = 3.0D;
     private static final UUID ARMOR_FLAT_ID = UUID.fromString("d4e6bbf8-3e5c-4a09-9e9c-bd3dbf1d6b01");
     private static final UUID ARMOR_PERCENT_ID = UUID.fromString("497559cc-d50c-4ae8-9e02-12f33a0f4d02");
 
@@ -223,24 +225,25 @@ public final class MordKaiserCompanion {
         }
 
         Vec3 direction = player.getLookAngle().normalize();
-        Vec3 eye = player.getEyePosition();
+        // Start the pull at waist height so the hand effect stays below the crosshair.
+        Vec3 origin = player.position().add(0.0D, 0.45D, 0.0D);
         showDeathGrasp(player, direction);
-        AABB area = new AABB(eye, eye.add(direction.scale(10.0D))).inflate(1.8D);
+        AABB area = new AABB(origin, origin.add(direction.scale(GRASP_RANGE))).inflate(GRASP_RADIUS);
         int pulled = 0;
         for (LivingEntity target : player.serverLevel().getEntitiesOfClass(LivingEntity.class, area,
                 entity -> entity != player && entity.isAlive() && !player.isAlliedTo(entity)
                         && !(entity instanceof ServerPlayer))) {
             Vec3 offset = target.position().add(0.0D, target.getBbHeight() * 0.45D, 0.0D)
-                    .subtract(eye);
+                    .subtract(origin);
             double along = offset.dot(direction);
-            if (along < 0.5D || along > 10.0D) continue;
+            if (along < 0.5D || along > GRASP_RANGE) continue;
             double lateral = offset.subtract(direction.scale(along)).length();
-            if (lateral > 1.8D) continue;
+            if (lateral > GRASP_RADIUS) continue;
 
-            Vec3 pull = player.position().add(0.0D, 0.7D, 0.0D)
+            Vec3 pull = player.position().add(0.0D, 0.55D, 0.0D)
                     .subtract(target.position());
             if (pull.lengthSqr() > 0.01D) {
-                target.setDeltaMovement(pull.normalize().scale(0.72D).add(0.0D, 0.16D, 0.0D));
+                target.setDeltaMovement(pull.normalize().scale(1.05D).add(0.0D, 0.22D, 0.0D));
                 target.hurtMarked = true;
             }
             target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 40, 0, false, true, true));
@@ -262,16 +265,17 @@ public final class MordKaiserCompanion {
             return 0;
         }
 
-        float converted = current * 0.5F;
-        player.setAbsorptionAmount(current - converted);
-        player.setHealth(Math.min(player.getMaxHealth(), player.getHealth() + converted));
-        int hunger = Math.max(1, Math.round(converted));
+        // Consume every absorption point; split its value evenly between health and hunger.
+        float restored = current * 0.5F;
+        player.setAbsorptionAmount(0.0F);
+        player.setHealth(Math.min(player.getMaxHealth(), player.getHealth() + restored));
+        int hunger = Math.max(1, Math.round(restored));
         var food = player.getFoodData();
         food.setFoodLevel(Math.min(20, food.getFoodLevel() + hunger));
         food.setSaturation(Math.min(food.getFoodLevel(), food.getSaturationLevel() + hunger));
-        player.displayClientMessage(Component.literal("Converted half your absorption into "
-                + String.format(java.util.Locale.ROOT, "%.1f", converted)
-                + " health and " + hunger + " hunger.").withStyle(ChatFormatting.GOLD), true);
+        player.displayClientMessage(Component.literal("Consumed all absorption: half became "
+                + String.format(java.util.Locale.ROOT, "%.1f", restored)
+                + " health and half became " + hunger + " hunger.").withStyle(ChatFormatting.GOLD), true);
         return 1;
     }
 
@@ -365,7 +369,8 @@ public final class MordKaiserCompanion {
 
     private static void showDeathGrasp(ServerPlayer player, Vec3 direction) {
         ServerLevel level = player.serverLevel();
-        Vec3 origin = player.getEyePosition().add(direction.scale(0.35D));
+        // Render the spectral hand from the player's lower torso rather than the camera.
+        Vec3 origin = player.position().add(0.0D, 0.45D, 0.0D).add(direction.scale(0.35D));
         Vec3 side = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
         if (side.lengthSqr() < 0.01D) side = new Vec3(1.0D, 0.0D, 0.0D);
         else side = side.normalize();
