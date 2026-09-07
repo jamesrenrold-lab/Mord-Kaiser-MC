@@ -84,8 +84,10 @@ public final class MordKaiserCompanion {
 
     @SubscribeEvent
     public void onLivingHeal(LivingHealEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player && isMord(player)) {
-            // The Origin's only healing source is its absorption-conversion power.
+        if (event.getEntity() instanceof ServerPlayer player && isMord(player)
+                && event.getAmount() <= 1.0F) {
+            // Natural food regeneration heals one point at a time; block that while
+            // leaving deliberate, stronger spell/potion healing available.
             event.setCanceled(true);
         }
     }
