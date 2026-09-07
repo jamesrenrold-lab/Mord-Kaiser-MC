@@ -19,10 +19,13 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
+import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -43,6 +46,7 @@ public final class MordKaiserCompanion {
     private static final String SHIELD_COOLDOWN = "MordShieldCooldown";
     private static final String METAL_UNTIL = "MordMetalUntil";
     private static final String METAL_COOLDOWN = "MordMetalCooldown";
+    private static final String GRASP_COOLDOWN = "MordGraspCooldown";
 
     private static final int SOUL_RESOURCE_MAX = 100;
     private static final int MACE_MAX = 3;
@@ -50,6 +54,7 @@ public final class MordKaiserCompanion {
     private static final long MACE_COOLDOWN_TICKS = 200L;
     private static final long METAL_DURATION_TICKS = 300L;
     private static final long METAL_COOLDOWN_TICKS = 900L;
+    private static final long GRASP_COOLDOWN_TICKS = 240L;
     private static final double METAL_RADIUS = 3.0D;
     private static final UUID ARMOR_FLAT_ID = UUID.fromString("d4e6bbf8-3e5c-4a09-9e9c-bd3dbf1d6b01");
     private static final UUID ARMOR_PERCENT_ID = UUID.fromString("497559cc-d50c-4ae8-9e02-12f33a0f4d02");
@@ -69,6 +74,30 @@ public final class MordKaiserCompanion {
         event.getDispatcher().register(net.minecraft.commands.Commands.literal("mordmetal")
                 .requires(source -> source.getEntity() instanceof ServerPlayer)
                 .executes(context -> activateMetal(context.getSource().getPlayerOrException())));
+        event.getDispatcher().register(net.minecraft.commands.Commands.literal("mordgrasp")
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
+                .executes(context -> useDeathGrasp(context.getSource().getPlayerOrException())));
+        event.getDispatcher().register(net.minecraft.commands.Commands.literal("mordconvert")
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
+                .executes(context -> convertAbsorption(context.getSource().getPlayerOrException())));
+    }
+
+    @SubscribeEvent
+    public void onLivingHeal(LivingHealEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player && isMord(player)) {
+            // The Origin's only healing source is its absorption-conversion power.
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent
+    public void onItemUseStart(LivingEntityUseItemEvent.Start event) {
+        if (event.getEntity() instanceof ServerPlayer player && isMord(player)
+                && event.getItem().isEdible()) {
+            event.setCanceled(true);
+            player.displayClientMessage(Component.literal("Iron Revenants cannot eat.")
+                    .withStyle(ChatFormatting.DARK_GRAY), true);
+        }
     }
 
     @SubscribeEvent
@@ -180,6 +209,70 @@ public final class MordKaiserCompanion {
         return 1;
     }
 
+    private static int useDeathGrasp(ServerPlayer player) {
+        if (!isMord(player)) return 0;
+        long now = player.serverLevel().getGameTime();
+        var data = getData(player);
+        if (data.getLong(GRASP_COOLDOWN) > now) {
+            long remaining = data.getLong(GRASP_COOLDOWN) - now;
+            player.displayClientMessage(Component.literal("Death's Grasp is cooling down ("
+                    + ((remaining + 19L) / 20L) + "s).").withStyle(ChatFormatting.DARK_PURPLE), true);
+            return 0;
+        }
+
+        Vec3 direction = player.getLookAngle().normalize();
+        Vec3 eye = player.getEyePosition();
+        showDeathGrasp(player, direction);
+        AABB area = new AABB(eye, eye.add(direction.scale(10.0D))).inflate(1.8D);
+        int pulled = 0;
+        for (LivingEntity target : player.serverLevel().getEntitiesOfClass(LivingEntity.class, area,
+                entity -> entity != player && entity.isAlive() && !player.isAlliedTo(entity)
+                        && !(entity instanceof ServerPlayer))) {
+            Vec3 offset = target.position().add(0.0D, target.getBbHeight() * 0.45D, 0.0D)
+                    .subtract(eye);
+            double along = offset.dot(direction);
+            if (along < 0.5D || along > 10.0D) continue;
+            double lateral = offset.subtract(direction.scale(along)).length();
+            if (lateral > 1.8D) continue;
+
+            Vec3 pull = player.position().add(0.0D, 0.7D, 0.0D)
+                    .subtract(target.position());
+            if (pull.lengthSqr() > 0.01D) {
+                target.setDeltaMovement(pull.normalize().scale(0.72D).add(0.0D, 0.16D, 0.0D));
+                target.hurtMarked = true;
+            }
+            target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 40, 0, false, true, true));
+            showGraspImpact(player.serverLevel(), target);
+            pulled++;
+        }
+        data.putLong(GRASP_COOLDOWN, now + GRASP_COOLDOWN_TICKS);
+        player.displayClientMessage(Component.literal("Death's Grasp pulled " + pulled + " target"
+                + (pulled == 1 ? "" : "s") + ".").withStyle(ChatFormatting.DARK_PURPLE), true);
+        return 1;
+    }
+
+    private static int convertAbsorption(ServerPlayer player) {
+        if (!isMord(player)) return 0;
+        float current = player.getAbsorptionAmount();
+        if (current <= 0.01F) {
+            player.displayClientMessage(Component.literal("You have no absorption to convert.")
+                    .withStyle(ChatFormatting.GOLD), true);
+            return 0;
+        }
+
+        float converted = current * 0.5F;
+        player.setAbsorptionAmount(current - converted);
+        player.setHealth(Math.min(player.getMaxHealth(), player.getHealth() + converted));
+        int hunger = Math.max(1, Math.round(converted));
+        var food = player.getFoodData();
+        food.setFoodLevel(Math.min(20, food.getFoodLevel() + hunger));
+        food.setSaturation(Math.min(food.getFoodLevel(), food.getSaturationLevel() + hunger));
+        player.displayClientMessage(Component.literal("Converted half your absorption into "
+                + String.format(java.util.Locale.ROOT, "%.1f", converted)
+                + " health and " + hunger + " hunger.").withStyle(ChatFormatting.GOLD), true);
+        return 1;
+    }
+
     private static int activateMetal(ServerPlayer player) {
         if (!isMord(player)) return 0;
         long now = player.serverLevel().getGameTime();
@@ -266,6 +359,35 @@ public final class MordKaiserCompanion {
     private static double getSpellPower(ServerPlayer player) {
         AttributeInstance attribute = player.getAttribute(AttributeRegistry.SPELL_POWER.get());
         return attribute == null ? 0.0D : Math.max(0.0D, attribute.getValue());
+    }
+
+    private static void showDeathGrasp(ServerPlayer player, Vec3 direction) {
+        ServerLevel level = player.serverLevel();
+        Vec3 origin = player.getEyePosition().add(direction.scale(0.35D));
+        Vec3 side = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
+        if (side.lengthSqr() < 0.01D) side = new Vec3(1.0D, 0.0D, 0.0D);
+        else side = side.normalize();
+
+        // A moving palm with five finger trails gives the pull a recognizable spectral-hand silhouette.
+        for (int step = 0; step < 18; step++) {
+            Vec3 center = origin.add(direction.scale(step * 0.48D));
+            level.sendParticles(ParticleTypes.SOUL_FIRE_FLAME, center.x, center.y, center.z,
+                    2, 0.10D, 0.10D, 0.10D, 0.01D);
+            for (int finger = -2; finger <= 2; finger++) {
+                Vec3 fingertip = center.add(side.scale(finger * 0.22D))
+                        .add(0.0D, 0.18D + Math.abs(finger) * 0.05D, 0.0D);
+                level.sendParticles(ParticleTypes.SOUL, fingertip.x, fingertip.y, fingertip.z,
+                        1, 0.02D, 0.02D, 0.02D, 0.0D);
+            }
+        }
+    }
+
+    private static void showGraspImpact(ServerLevel level, LivingEntity target) {
+        double x = target.getX();
+        double y = target.getY() + target.getBbHeight() * 0.5D;
+        double z = target.getZ();
+        level.sendParticles(ParticleTypes.SOUL, x, y, z, 12, 0.35D, 0.45D, 0.35D, 0.03D);
+        level.sendParticles(ParticleTypes.REVERSE_PORTAL, x, y, z, 10, 0.25D, 0.35D, 0.25D, 0.05D);
     }
 
     private static void showMaceBurst(ServerPlayer player, LivingEntity target) {
