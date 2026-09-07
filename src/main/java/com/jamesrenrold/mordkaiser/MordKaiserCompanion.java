@@ -575,7 +575,7 @@ public final class MordKaiserCompanion {
                 -ARENA_HALF_SIZE, centerX + ARENA_HALF_SIZE + 1,
                 session.arenaFloorTop + ARENA_WALL_HEIGHT, ARENA_HALF_SIZE + 1);
         ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
-        for (Entity entity : new ArrayList<>(domain.getEntities(null, arena, Entity::isAlive))) {
+        for (Entity entity : new ArrayList<>(domain.getEntities((Entity) null, arena, Entity::isAlive))) {
             if (entity instanceof ServerPlayer serverPlayer && serverPlayer.getUUID().equals(session.playerId)) continue;
             if (entity.getUUID().equals(session.targetId)) continue;
             if ((entity instanceof ItemEntity || entity instanceof ExperienceOrb) && destination != null) {
