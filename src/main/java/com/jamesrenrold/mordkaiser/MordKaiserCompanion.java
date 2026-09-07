@@ -517,12 +517,12 @@ public final class MordKaiserCompanion {
     }
 
     private static void playDomainLoop(ServerPlayer player) {
-        player.playNotifySound(REALM_OF_DEATH_LOOP.get(), SoundSource.MUSIC, 1.0F, 1.0F);
+        player.playNotifySound(REALM_OF_DEATH_LOOP.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
     }
 
     private static void stopDomainLoop(ServerPlayer player) {
         player.connection.send(new ClientboundStopSoundPacket(
-                REALM_OF_DEATH_LOOP.get().getLocation(), SoundSource.MUSIC));
+                REALM_OF_DEATH_LOOP.get().getLocation(), SoundSource.PLAYERS));
     }
 
     private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
