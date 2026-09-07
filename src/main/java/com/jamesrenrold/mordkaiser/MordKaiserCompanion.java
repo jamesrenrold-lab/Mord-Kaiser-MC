@@ -3,7 +3,12 @@ package com.jamesrenrold.mordkaiser;
 import io.redspace.ironsspellbooks.api.registry.AttributeRegistry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -13,12 +18,22 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -26,9 +41,14 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.joml.Vector3f;
 
@@ -58,11 +78,84 @@ public final class MordKaiserCompanion {
     private static final double METAL_RADIUS = 3.0D;
     private static final double GRASP_RANGE = 14.0D;
     private static final double GRASP_RADIUS = 3.0D;
+
+    private static final ResourceKey<Level> DOMAIN_KEY =
+            ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
+    private static final int DOMAIN_DURATION_TICKS = 20 * 60;
+    private static final int DOMAIN_WINDUP_TICKS = 23;
+    private static final double DOMAIN_TARGET_RANGE = 40.0D;
+    private static final double ARENA_SPACING = 160.0D;
+    private static final int ARENA_HALF_SIZE = 24;
+    private static final int ARENA_WALL_HEIGHT = 24;
+
     private static final UUID ARMOR_FLAT_ID = UUID.fromString("d4e6bbf8-3e5c-4a09-9e9c-bd3dbf1d6b01");
     private static final UUID ARMOR_PERCENT_ID = UUID.fromString("497559cc-d50c-4ae8-9e02-12f33a0f4d02");
+    private static final UUID DOMAIN_SPELL_POWER_ID = UUID.fromString("6a7d749d-0b9d-4bcf-9c57-9e50ec8f8f01");
+    private static final UUID DOMAIN_ATTACK_DAMAGE_ID = UUID.fromString("e4d1c8df-6b8d-4d32-9f29-63ce4d6bf102");
+    private static final UUID DOMAIN_ATTACK_SPEED_ID = UUID.fromString("9f5cb1ef-8e06-40f0-95e0-1a5e9c711203");
+    private static final UUID DOMAIN_ARMOR_ID = UUID.fromString("3a2f7a7e-55d3-4d89-b9e0-cc3cc9e2d204");
+    private static final UUID DOMAIN_HEALTH_ID = UUID.fromString("1d7c4e91-2ac0-4a5f-8e7d-0b8b9f3a5205");
+    private static final Map<UUID, PendingDomain> PENDING_DOMAINS = new HashMap<>();
+    private static final Map<UUID, DomainSession> DOMAIN_SESSIONS = new HashMap<>();
 
     public MordKaiserCompanion() {
         MinecraftForge.EVENT_BUS.register(this);
+    }
+
+    private static final class SavedLocation {
+        final ResourceKey<Level> dimension;
+        final double x;
+        final double y;
+        final double z;
+        final float yaw;
+        final float pitch;
+
+        SavedLocation(Entity entity) {
+            this.dimension = entity.level().dimension();
+            this.x = entity.getX();
+            this.y = entity.getY();
+            this.z = entity.getZ();
+            this.yaw = entity.getYRot();
+            this.pitch = entity.getXRot();
+        }
+    }
+
+    private static final class PendingDomain {
+        final SavedLocation playerOrigin;
+        final SavedLocation targetOrigin;
+        final UUID targetId;
+        final LivingEntity target;
+        int ticksRemaining = DOMAIN_WINDUP_TICKS;
+
+        PendingDomain(SavedLocation playerOrigin, SavedLocation targetOrigin, LivingEntity target) {
+            this.playerOrigin = playerOrigin;
+            this.targetOrigin = targetOrigin;
+            this.target = target;
+            this.targetId = target.getUUID();
+        }
+    }
+
+    private static final class DomainSession {
+        final UUID playerId;
+        final UUID targetId;
+        final SavedLocation playerOrigin;
+        final SavedLocation targetOrigin;
+        final double arenaX;
+        final int arenaFloorTop;
+        LivingEntity target;
+        int ticksRemaining = DOMAIN_DURATION_TICKS;
+        int lastDisplayedSecond = Integer.MIN_VALUE;
+
+        DomainSession(UUID playerId, UUID targetId, SavedLocation playerOrigin, SavedLocation targetOrigin,
+                      LivingEntity target, double arenaX, int arenaFloorTop) {
+            this.playerId = playerId;
+            this.targetId = targetId;
+            this.playerOrigin = playerOrigin;
+            this.targetOrigin = targetOrigin;
+            this.target = target;
+            this.arenaX = arenaX;
+            this.arenaFloorTop = arenaFloorTop;
+        }
     }
 
     @SubscribeEvent
@@ -82,6 +175,12 @@ public final class MordKaiserCompanion {
         event.getDispatcher().register(net.minecraft.commands.Commands.literal("mordconvert")
                 .requires(source -> source.getEntity() instanceof ServerPlayer)
                 .executes(context -> convertAbsorption(context.getSource().getPlayerOrException())));
+        event.getDispatcher().register(net.minecraft.commands.Commands.literal("morddomain")
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
+                .executes(context -> activateDomain(context.getSource().getPlayerOrException())));
+        event.getDispatcher().register(net.minecraft.commands.Commands.literal("morddomainreturn")
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
+                .executes(context -> emergencyDomainReturn(context.getSource().getPlayerOrException())));
     }
 
     @SubscribeEvent
@@ -101,6 +200,86 @@ public final class MordKaiserCompanion {
             event.setCanceled(true);
             player.displayClientMessage(Component.literal("Iron Revenants cannot eat.")
                     .withStyle(ChatFormatting.DARK_GRAY), true);
+        }
+    }
+
+
+    @SubscribeEvent
+    public void onDomainPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || !(event.player instanceof ServerPlayer player)) return;
+
+        PendingDomain pending = PENDING_DOMAINS.get(player.getUUID());
+        if (pending != null) {
+            if (pending.target == null || pending.target.isRemoved() || !pending.target.isAlive()) {
+                PENDING_DOMAINS.remove(player.getUUID());
+                player.displayClientMessage(Component.literal("Realm of Death cancelled: target was defeated.")
+                        .withStyle(ChatFormatting.DARK_RED), true);
+                return;
+            }
+            pending.ticksRemaining--;
+            if (pending.ticksRemaining <= 0) {
+                PENDING_DOMAINS.remove(player.getUUID());
+                completeDomainActivation(player, pending);
+            }
+            return;
+        }
+
+        DomainSession session = DOMAIN_SESSIONS.get(player.getUUID());
+        if (session == null) return;
+        if (player.level().dimension() != DOMAIN_KEY) {
+            finishDomain(player, session, "Realm of Death released: you left the arena.");
+            return;
+        }
+
+        LivingEntity target = session.target;
+        if (target == null || target.isRemoved() || !target.isAlive()) {
+            finishDomain(player, session, "Realm of Death released: target defeated.");
+            return;
+        }
+        if (target.level().dimension() != DOMAIN_KEY) {
+            finishDomain(player, session, "Realm of Death released: target escaped.");
+            return;
+        }
+
+        if (session.ticksRemaining % 20 == 0) {
+            target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 40, 0, false, true, true));
+        }
+        updateDomainCountdown(player, session);
+        session.ticksRemaining--;
+        if (session.ticksRemaining <= 0) {
+            finishDomain(player, session, "Realm of Death released: one minute elapsed.");
+        }
+    }
+
+    @SubscribeEvent
+    public void onDomainLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        PENDING_DOMAINS.remove(player.getUUID());
+        DomainSession session = DOMAIN_SESSIONS.get(player.getUUID());
+        if (session != null) finishDomain(player, session, null);
+    }
+
+    @SubscribeEvent
+    public void onDomainRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        PENDING_DOMAINS.remove(player.getUUID());
+        DomainSession session = DOMAIN_SESSIONS.remove(player.getUUID());
+        if (session == null) return;
+
+        removeDomainModifiers(player);
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
+        if (session.target == null || session.target.isRemoved() || !session.target.isAlive()) {
+            transferDomainLoot(server, session);
+        } else {
+            returnDomainTarget(server, session);
+        }
+        cleanupDomainArena(server, session);
+        ServerLevel origin = server.getLevel(session.playerOrigin.dimension);
+        if (origin != null) {
+            player.teleportTo(origin, session.playerOrigin.x, session.playerOrigin.y, session.playerOrigin.z,
+                    session.playerOrigin.yaw, session.playerOrigin.pitch);
+            player.setDeltaMovement(Vec3.ZERO);
         }
     }
 
@@ -157,6 +336,354 @@ public final class MordKaiserCompanion {
                 removeArmorModifiers(player);
             }
         }
+    }
+
+
+    private static int activateDomain(ServerPlayer player) {
+        if (!isMord(player)) return 0;
+        if (PENDING_DOMAINS.containsKey(player.getUUID()) || DOMAIN_SESSIONS.containsKey(player.getUUID())) {
+            player.displayClientMessage(Component.literal("Realm of Death is already active or opening.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
+
+        MinecraftServer server = player.getServer();
+        if (server == null || server.getLevel(DOMAIN_KEY) == null) {
+            player.displayClientMessage(Component.literal("Realm of Death failed: mord_kaiser:mord_domain is not loaded.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
+
+        LivingEntity target = findHostileCrosshairTarget(player);
+        if (target == null) {
+            player.displayClientMessage(Component.literal("Aim directly at a hostile mob within 40 blocks.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
+
+        PENDING_DOMAINS.put(player.getUUID(),
+                new PendingDomain(new SavedLocation(player), new SavedLocation(target), target));
+        player.displayClientMessage(Component.literal("Realm of Death...")
+                .withStyle(ChatFormatting.DARK_RED), true);
+        return 1;
+    }
+
+    private static void completeDomainActivation(ServerPlayer player, PendingDomain pending) {
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
+        ServerLevel domain = server.getLevel(DOMAIN_KEY);
+        LivingEntity target = pending.target;
+        if (domain == null || target == null || target.isRemoved() || !target.isAlive()) return;
+
+        double arenaX = arenaCenterFor(player.getUUID());
+        int floorTop = arenaFloorTop(domain, arenaX);
+        double arenaY = floorTop + 1.0D;
+        buildArenaCage(domain, arenaX, floorTop);
+
+        LivingEntity domainTarget = transferLivingEntity(target, domain, arenaX, arenaY, 7.0D, 180.0F, 0.0F);
+        if (domainTarget == null || domainTarget.isRemoved() || !domainTarget.isAlive()) {
+            removeArenaCage(domain, arenaX, floorTop);
+            player.displayClientMessage(Component.literal("Realm of Death failed to move the target.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return;
+        }
+
+        applyDomainModifiers(player);
+        DomainSession session = new DomainSession(player.getUUID(), pending.targetId, pending.playerOrigin,
+                pending.targetOrigin, domainTarget, arenaX, floorTop);
+        DOMAIN_SESSIONS.put(player.getUUID(), session);
+        player.teleportTo(domain, arenaX, arenaY, -7.0D, 0.0F, 0.0F);
+        player.setDeltaMovement(Vec3.ZERO);
+        domain.playSound(null, player.blockPosition(), SoundEvents.END_PORTAL_SPAWN,
+                SoundSource.PLAYERS, 0.8F, 1.1F);
+        updateDomainCountdown(player, session);
+    }
+
+    private static int emergencyDomainReturn(ServerPlayer player) {
+        if (!isMord(player)) return 0;
+        PENDING_DOMAINS.remove(player.getUUID());
+        DomainSession session = DOMAIN_SESSIONS.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active Realm of Death found.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
+        finishDomain(player, session, "Realm of Death released manually.");
+        return 1;
+    }
+
+    private static LivingEntity findHostileCrosshairTarget(ServerPlayer player) {
+        Vec3 start = player.getEyePosition();
+        Vec3 look = player.getLookAngle();
+        Vec3 end = start.add(look.scale(DOMAIN_TARGET_RANGE));
+        AABB search = player.getBoundingBox().expandTowards(look.scale(DOMAIN_TARGET_RANGE)).inflate(1.0D);
+        EntityHitResult hit = ProjectileUtil.getEntityHitResult(player, start, end, search,
+                entity -> entity instanceof LivingEntity living
+                        && entity != player
+                        && entity.isPickable()
+                        && entity.isAlive()
+                        && isHostile(living)
+                        && !living.getTags().contains(ORIGIN_TAG),
+                DOMAIN_TARGET_RANGE * DOMAIN_TARGET_RANGE);
+        if (hit == null || !(hit.getEntity() instanceof LivingEntity living)) return null;
+        return player.hasLineOfSight(living) ? living : null;
+    }
+
+    private static boolean isHostile(LivingEntity living) {
+        return living instanceof Enemy || living.getType().getCategory() == MobCategory.MONSTER;
+    }
+
+    private static double arenaCenterFor(UUID playerId) {
+        return Math.floorMod(playerId.hashCode(), 4096) * ARENA_SPACING + 0.5D;
+    }
+
+    private static int arenaFloorTop(ServerLevel domain, double arenaX) {
+        int x = (int) Math.floor(arenaX);
+        domain.getChunkAt(new BlockPos(x, 0, -7));
+        domain.getChunkAt(new BlockPos(x, 0, 7));
+        int playerFloor = domain.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, -7);
+        int targetFloor = domain.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, 7);
+        return Math.max(playerFloor, targetFloor);
+    }
+
+    private static void buildArenaCage(ServerLevel domain, double arenaX, int floorTop) {
+        int centerX = (int) Math.floor(arenaX);
+        int minX = centerX - ARENA_HALF_SIZE;
+        int maxX = centerX + ARENA_HALF_SIZE;
+        int minY = floorTop;
+        int maxY = floorTop + ARENA_WALL_HEIGHT - 1;
+        int minZ = -ARENA_HALF_SIZE;
+        int maxZ = ARENA_HALF_SIZE;
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                domain.setBlock(new BlockPos(x, y, minZ), Blocks.BARRIER.defaultBlockState(), 3);
+                domain.setBlock(new BlockPos(x, y, maxZ), Blocks.BARRIER.defaultBlockState(), 3);
+            }
+            for (int z = minZ + 1; z < maxZ; z++) {
+                domain.setBlock(new BlockPos(minX, y, z), Blocks.BARRIER.defaultBlockState(), 3);
+                domain.setBlock(new BlockPos(maxX, y, z), Blocks.BARRIER.defaultBlockState(), 3);
+            }
+        }
+    }
+
+    private static void removeArenaCage(ServerLevel domain, double arenaX, int floorTop) {
+        int centerX = (int) Math.floor(arenaX);
+        int minX = centerX - ARENA_HALF_SIZE;
+        int maxX = centerX + ARENA_HALF_SIZE;
+        int minY = floorTop;
+        int maxY = floorTop + ARENA_WALL_HEIGHT - 1;
+        int minZ = -ARENA_HALF_SIZE;
+        int maxZ = ARENA_HALF_SIZE;
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                clearBarrier(domain, new BlockPos(x, y, minZ));
+                clearBarrier(domain, new BlockPos(x, y, maxZ));
+            }
+            for (int z = minZ + 1; z < maxZ; z++) {
+                clearBarrier(domain, new BlockPos(minX, y, z));
+                clearBarrier(domain, new BlockPos(maxX, y, z));
+            }
+        }
+    }
+
+    private static void clearBarrier(ServerLevel domain, BlockPos pos) {
+        if (domain.getBlockState(pos).is(Blocks.BARRIER)) {
+            domain.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+        }
+    }
+
+    private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
+        int seconds = Math.max(0, (session.ticksRemaining + 19) / 20);
+        if (seconds == session.lastDisplayedSecond) return;
+        session.lastDisplayedSecond = seconds;
+        String json = "{\"text\":\"Realm of Death: " + seconds
+                + "s\",\"color\":\"dark_red\",\"bold\":true}";
+        player.getServer().getCommands().performPrefixedCommand(
+                player.createCommandSourceStack().withPermission(2).withSuppressedOutput(),
+                "title @s actionbar " + json);
+    }
+
+    private static void applyDomainModifiers(ServerPlayer player) {
+        AttributeInstance maxHealth = player.getAttribute(Attributes.MAX_HEALTH);
+        double oldMaxHealth = player.getMaxHealth();
+        addDomainModifier(maxHealth, DOMAIN_HEALTH_ID, "Mord Realm max health", 0.20D);
+        addDomainModifier(player.getAttribute(Attributes.ATTACK_DAMAGE), DOMAIN_ATTACK_DAMAGE_ID,
+                "Mord Realm attack damage", 0.20D);
+        addDomainModifier(player.getAttribute(Attributes.ATTACK_SPEED), DOMAIN_ATTACK_SPEED_ID,
+                "Mord Realm attack speed", 0.15D);
+        addDomainModifier(player.getAttribute(Attributes.ARMOR), DOMAIN_ARMOR_ID,
+                "Mord Realm armor", 0.20D);
+        addDomainModifier(player.getAttribute(AttributeRegistry.SPELL_POWER.get()), DOMAIN_SPELL_POWER_ID,
+                "Mord Realm spell power", 0.20D);
+        double newMaxHealth = player.getMaxHealth();
+        if (newMaxHealth > oldMaxHealth) {
+            player.setHealth(Math.min((float) newMaxHealth,
+                    player.getHealth() + (float) (newMaxHealth - oldMaxHealth)));
+        }
+    }
+
+    private static void addDomainModifier(AttributeInstance attribute, UUID id, String name, double value) {
+        if (attribute != null && attribute.getModifier(id) == null) {
+            attribute.addTransientModifier(new AttributeModifier(id, name, value,
+                    AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+    }
+
+    private static void removeDomainModifiers(ServerPlayer player) {
+        removeDomainModifier(player.getAttribute(Attributes.MAX_HEALTH), DOMAIN_HEALTH_ID);
+        removeDomainModifier(player.getAttribute(Attributes.ATTACK_DAMAGE), DOMAIN_ATTACK_DAMAGE_ID);
+        removeDomainModifier(player.getAttribute(Attributes.ATTACK_SPEED), DOMAIN_ATTACK_SPEED_ID);
+        removeDomainModifier(player.getAttribute(Attributes.ARMOR), DOMAIN_ARMOR_ID);
+        removeDomainModifier(player.getAttribute(AttributeRegistry.SPELL_POWER.get()), DOMAIN_SPELL_POWER_ID);
+        player.setHealth(Math.min(player.getHealth(), player.getMaxHealth()));
+    }
+
+    private static void removeDomainModifier(AttributeInstance attribute, UUID id) {
+        if (attribute != null) attribute.removeModifier(id);
+    }
+
+    private static void finishDomain(ServerPlayer player, DomainSession session, String message) {
+        if (!DOMAIN_SESSIONS.remove(session.playerId, session)) return;
+        removeDomainModifiers(player);
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
+
+        if (session.target == null || session.target.isRemoved() || !session.target.isAlive()) {
+            transferDomainLoot(server, session);
+        } else {
+            returnDomainTarget(server, session);
+        }
+        cleanupDomainArena(server, session);
+        ServerLevel origin = server.getLevel(session.playerOrigin.dimension);
+        if (origin != null) {
+            player.teleportTo(origin, session.playerOrigin.x, session.playerOrigin.y, session.playerOrigin.z,
+                    session.playerOrigin.yaw, session.playerOrigin.pitch);
+            player.setDeltaMovement(Vec3.ZERO);
+        }
+        if (message != null) {
+            player.displayClientMessage(Component.literal(message).withStyle(ChatFormatting.DARK_RED), true);
+        }
+    }
+
+    private static void cleanupDomainArena(MinecraftServer server, DomainSession session) {
+        ServerLevel domain = server.getLevel(DOMAIN_KEY);
+        if (domain == null) return;
+        int centerX = (int) Math.floor(session.arenaX);
+        AABB arena = new AABB(centerX - ARENA_HALF_SIZE, session.arenaFloorTop,
+                -ARENA_HALF_SIZE, centerX + ARENA_HALF_SIZE + 1,
+                session.arenaFloorTop + ARENA_WALL_HEIGHT, ARENA_HALF_SIZE + 1);
+        ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
+        for (Entity entity : new ArrayList<>(domain.getEntities(null, arena, Entity::isAlive))) {
+            if (entity instanceof ServerPlayer serverPlayer && serverPlayer.getUUID().equals(session.playerId)) continue;
+            if (entity.getUUID().equals(session.targetId)) continue;
+            if ((entity instanceof ItemEntity || entity instanceof ExperienceOrb) && destination != null) {
+                transferLooseEntity(entity, destination, session.targetOrigin.x, session.targetOrigin.y, session.targetOrigin.z);
+            } else {
+                entity.discard();
+            }
+        }
+        removeArenaCage(domain, session.arenaX, session.arenaFloorTop);
+    }
+
+    private static void transferDomainLoot(MinecraftServer server, DomainSession session) {
+        LivingEntity deadTarget = session.target;
+        if (deadTarget == null || !(deadTarget.level() instanceof ServerLevel domain)) return;
+        ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
+        if (destination == null) return;
+        Vec3 deathPos = deadTarget.position();
+        AABB capture = new AABB(deathPos, deathPos).inflate(8.0D);
+        List<Entity> loot = new ArrayList<>();
+        loot.addAll(domain.getEntitiesOfClass(ItemEntity.class, capture, Entity::isAlive));
+        loot.addAll(domain.getEntitiesOfClass(ExperienceOrb.class, capture, Entity::isAlive));
+        for (Entity entity : loot) {
+            transferLooseEntity(entity, destination, session.targetOrigin.x, session.targetOrigin.y, session.targetOrigin.z);
+        }
+    }
+
+    private static void returnDomainTarget(MinecraftServer server, DomainSession session) {
+        LivingEntity target = session.target;
+        if (target == null || target.isRemoved() || !target.isAlive()) return;
+        ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
+        if (destination == null) return;
+        LivingEntity returned = transferLivingEntity(target, destination, session.targetOrigin.x,
+                session.targetOrigin.y, session.targetOrigin.z, session.targetOrigin.yaw, session.targetOrigin.pitch);
+        if (returned != null) {
+            returned.setDeltaMovement(Vec3.ZERO);
+            session.target = returned;
+        }
+    }
+
+    private static LivingEntity transferLivingEntity(LivingEntity source, ServerLevel destination,
+                                                      double x, double y, double z, float yaw, float pitch) {
+        if (source instanceof ServerPlayer || destination == null) return null;
+        ServerLevel sourceLevel = source.level() instanceof ServerLevel serverLevel ? serverLevel : null;
+        if (sourceLevel == null) return null;
+        UUID sourceId = source.getUUID();
+        double originalX = source.getX();
+        double originalY = source.getY();
+        double originalZ = source.getZ();
+        float originalYaw = source.getYRot();
+        float originalPitch = source.getXRot();
+        CompoundTag snapshot = new CompoundTag();
+        if (!source.save(snapshot)) return null;
+        snapshot.putUUID("UUID", sourceId);
+        source.discard();
+
+        Entity recreated = EntityType.loadEntityRecursive(snapshot, destination, entity -> {
+            entity.setUUID(sourceId);
+            entity.moveTo(x, y, z, yaw, pitch);
+            entity.setDeltaMovement(Vec3.ZERO);
+            return entity;
+        });
+        if (recreated instanceof LivingEntity living && destination.addWithUUID(living)) {
+            return living;
+        }
+
+        Entity restored = EntityType.loadEntityRecursive(snapshot, sourceLevel, entity -> {
+            entity.setUUID(sourceId);
+            entity.moveTo(originalX, originalY, originalZ, originalYaw, originalPitch);
+            entity.setDeltaMovement(Vec3.ZERO);
+            return entity;
+        });
+        if (restored != null) sourceLevel.addWithUUID(restored);
+        return null;
+    }
+
+    private static boolean transferLooseEntity(Entity source, ServerLevel destination,
+                                               double x, double y, double z) {
+        if (source == null || source.isRemoved() || destination == null
+                || source instanceof LivingEntity || source instanceof ServerPlayer) return false;
+        ServerLevel sourceLevel = source.level() instanceof ServerLevel serverLevel ? serverLevel : null;
+        if (sourceLevel == null) return false;
+        UUID sourceId = source.getUUID();
+        double originalX = source.getX();
+        double originalY = source.getY();
+        double originalZ = source.getZ();
+        float originalYaw = source.getYRot();
+        float originalPitch = source.getXRot();
+        CompoundTag snapshot = new CompoundTag();
+        if (!source.save(snapshot)) return false;
+        snapshot.putUUID("UUID", sourceId);
+        source.discard();
+
+        Entity recreated = EntityType.loadEntityRecursive(snapshot, destination, entity -> {
+            entity.setUUID(sourceId);
+            entity.moveTo(x, y, z, originalYaw, originalPitch);
+            entity.setDeltaMovement(Vec3.ZERO);
+            return entity;
+        });
+        if (recreated != null && destination.addWithUUID(recreated)) return true;
+
+        Entity restored = EntityType.loadEntityRecursive(snapshot, sourceLevel, entity -> {
+            entity.setUUID(sourceId);
+            entity.moveTo(originalX, originalY, originalZ, originalYaw, originalPitch);
+            entity.setDeltaMovement(Vec3.ZERO);
+            return entity;
+        });
+        if (restored != null) sourceLevel.addWithUUID(restored);
+        return false;
     }
 
     private static int useSoulShield(ServerPlayer player) {
