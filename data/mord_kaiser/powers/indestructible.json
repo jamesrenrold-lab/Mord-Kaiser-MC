@@ -1,7 +1,7 @@
 {
   "type": "origins:active_self",
   "name": "§6Indestructible",
-  "description": "Consume half of your current absorption to restore the same amount as health and hunger. Natural and food-based healing are unavailable.",
+  "description": "Consume all current absorption; half becomes health and half becomes hunger. Natural and food-based healing are unavailable.",
   "cooldown": 1,
   "hud_render": {
     "should_render": true,
