@@ -1,8 +1,8 @@
 {
   "type": "origins:active_self",
   "name": "§5Death's Grasp",
-  "description": "A spectral hand reaches forward, pulls nearby mobs toward you, and applies Slowness I for 2 seconds. Cooldown: 12 seconds.",
-  "cooldown": 240,
+  "description": "A spectral hand reaches forward, pulls nearby mobs toward you, and applies Slowness I for 2 seconds. Cooldown: 13 seconds.",
+  "cooldown": 260,
   "hud_render": {
     "should_render": true,
     "sprite_location": "mord_kaiser:textures/gui/death_grasp.png",
