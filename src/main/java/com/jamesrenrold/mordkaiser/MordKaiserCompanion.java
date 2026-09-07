@@ -54,7 +54,7 @@ public final class MordKaiserCompanion {
     private static final long MACE_COOLDOWN_TICKS = 200L;
     private static final long METAL_DURATION_TICKS = 300L;
     private static final long METAL_COOLDOWN_TICKS = 900L;
-    private static final long GRASP_COOLDOWN_TICKS = 240L;
+    private static final long GRASP_COOLDOWN_TICKS = 260L;
     private static final double METAL_RADIUS = 3.0D;
     private static final UUID ARMOR_FLAT_ID = UUID.fromString("d4e6bbf8-3e5c-4a09-9e9c-bd3dbf1d6b01");
     private static final UUID ARMOR_PERCENT_ID = UUID.fromString("497559cc-d50c-4ae8-9e02-12f33a0f4d02");
