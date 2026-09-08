@@ -7,7 +7,7 @@
   "has_raids": false,
   "has_skylight": false,
   "has_ceiling": true,
-  "ambient_light": 0.0,
+  "ambient_light": 0.35,
   "infiniburn": "#minecraft:infiniburn_overworld",
   "effects": "minecraft:the_nether",
   "min_y": 0,
