@@ -1,10 +1,21 @@
 {
-  "type": "origins:action_over_time",
+  "type": "origins:action_on_callback",
   "name": "§8Iron Revenant",
-  "description": "Marks this player for the Mord-Kaiser companion mechanics.",
-  "interval": 20,
-  "entity_action": {
+  "description": "Marks this player for the Mord-Kaiser companion mechanics and clears the marker when the origin is removed.",
+  "entity_action_gained": {
     "type": "origins:execute_command",
     "command": "tag @s add mord_kaiser"
+  },
+  "entity_action_added": {
+    "type": "origins:execute_command",
+    "command": "tag @s add mord_kaiser"
+  },
+  "entity_action_lost": {
+    "type": "origins:execute_command",
+    "command": "tag @s remove mord_kaiser"
+  },
+  "entity_action_removed": {
+    "type": "origins:execute_command",
+    "command": "tag @s remove mord_kaiser"
   }
 }
