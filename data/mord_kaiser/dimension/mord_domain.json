@@ -1,5 +1,5 @@
 {
-  "type": "minecraft:overworld",
+  "type": "mord_kaiser:mord_domain",
   "generator": {
     "type": "minecraft:flat",
     "settings": {
@@ -8,7 +8,7 @@
       "lakes": false,
       "layers": [
         { "height": 1, "block": "minecraft:bedrock" },
-        { "height": 4, "block": "minecraft:polished_blackstone" }
+        { "height": 4, "block": "minecraft:soul_soil" }
       ],
       "structure_overrides": []
     }
