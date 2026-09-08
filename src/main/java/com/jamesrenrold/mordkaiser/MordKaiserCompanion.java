@@ -477,6 +477,16 @@ public final class MordKaiserCompanion {
         int minZ = -ARENA_HALF_SIZE;
         int maxZ = ARENA_HALF_SIZE;
 
+        // Keep existing domain chunks visually consistent when the datapack is updated.
+        // The generator supplies soul soil for new chunks; this refreshes the arena surface
+        // for worlds where the domain was already generated.
+        for (int x = minX + 1; x < maxX; x++) {
+            for (int z = minZ + 1; z < maxZ; z++) {
+                domain.setBlock(new BlockPos(x, floorTop - 1, z),
+                        Blocks.SOUL_SOIL.defaultBlockState(), 3);
+            }
+        }
+
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {
                 domain.setBlock(new BlockPos(x, y, minZ), Blocks.BARRIER.defaultBlockState(), 3);
