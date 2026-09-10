@@ -81,7 +81,7 @@ public final class MordKaiserCompanion {
     private static final long METAL_DURATION_TICKS = 300L;
     private static final long METAL_COOLDOWN_TICKS = 900L;
     private static final long GRASP_COOLDOWN_TICKS = 260L;
-    private static final double METAL_RADIUS = 3.0D;
+    private static final double METAL_RADIUS = 5.0D;
     private static final double GRASP_RANGE = 14.0D;
     private static final double GRASP_RADIUS = 3.0D;
 
@@ -89,7 +89,8 @@ public final class MordKaiserCompanion {
             ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
     private static final int DOMAIN_DURATION_TICKS = 20 * 60;
     private static final int DOMAIN_WINDUP_TICKS = 23;
-    // The uploaded track is 18.192 seconds; restart it every 364 ticks while inside.
+    // Start the domain track five seconds after entry, then restart it every 364 ticks.
+    private static final int DOMAIN_SOUND_DELAY_TICKS = 100;
     private static final int DOMAIN_SOUND_PERIOD_TICKS = 364;
     private static final double DOMAIN_TARGET_RANGE = 40.0D;
     private static final double ARENA_SPACING = 160.0D;
@@ -158,7 +159,7 @@ public final class MordKaiserCompanion {
         final int arenaFloorTop;
         LivingEntity target;
         int ticksRemaining = DOMAIN_DURATION_TICKS;
-        int soundTicksUntilNext = DOMAIN_SOUND_PERIOD_TICKS;
+        int soundTicksUntilNext = DOMAIN_SOUND_DELAY_TICKS;
         int lastDisplayedSecond = Integer.MIN_VALUE;
 
         DomainSession(UUID playerId, UUID targetId, SavedLocation playerOrigin, SavedLocation targetOrigin,
@@ -415,7 +416,6 @@ public final class MordKaiserCompanion {
         DOMAIN_SESSIONS.put(player.getUUID(), session);
         player.teleportTo(domain, arenaX, arenaY, -7.0D, 0.0F, 0.0F);
         player.setDeltaMovement(Vec3.ZERO);
-        playDomainLoop(player);
         domain.playSound(null, player.blockPosition(), SoundEvents.END_PORTAL_SPAWN,
                 SoundSource.PLAYERS, 0.8F, 1.1F);
         updateDomainCountdown(player, session);
@@ -1004,6 +1004,18 @@ public final class MordKaiserCompanion {
             double radius = 0.45D + (i % 3) * 0.55D;
             level.sendParticles(cyan, player.getX() + Math.cos(angle) * radius, player.getY() + 0.25D,
                     player.getZ() + Math.sin(angle) * radius, 1, 0.02D, 0.08D, 0.02D, 0.0D);
+        }
+
+        // Grey metal shards orbit above the aura while it is active.
+        DustParticleOptions grey = new DustParticleOptions(new Vector3f(0.45F, 0.45F, 0.48F), 0.9F);
+        double phase = level.getGameTime() * 0.18D;
+        for (int i = 0; i < 24; i++) {
+            double angle = phase + (Math.PI * 2.0D * i) / 24.0D;
+            double radius = 1.35D + 0.18D * Math.sin(angle * 3.0D);
+            double yOffset = 1.35D + 0.30D * Math.sin(angle * 2.0D);
+            level.sendParticles(grey, player.getX() + Math.cos(angle) * radius,
+                    player.getY() + yOffset, player.getZ() + Math.sin(angle) * radius,
+                    1, 0.02D, 0.03D, 0.02D, 0.0D);
         }
     }
 
