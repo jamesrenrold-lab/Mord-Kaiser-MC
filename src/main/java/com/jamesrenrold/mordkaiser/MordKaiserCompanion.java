@@ -89,9 +89,9 @@ public final class MordKaiserCompanion {
             ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
     private static final int DOMAIN_DURATION_TICKS = 20 * 60;
     private static final int DOMAIN_WINDUP_TICKS = 23;
-    // Start the domain track five seconds after entry, then restart it every 364 ticks.
+    // Start the ~55-second domain track five seconds after entry; the domain ends before a restart is needed.
     private static final int DOMAIN_SOUND_DELAY_TICKS = 100;
-    private static final int DOMAIN_SOUND_PERIOD_TICKS = 364;
+    private static final int DOMAIN_SOUND_PERIOD_TICKS = 1200;
     private static final double DOMAIN_TARGET_RANGE = 40.0D;
     private static final double ARENA_SPACING = 160.0D;
     private static final int ARENA_HALF_SIZE = 24;
