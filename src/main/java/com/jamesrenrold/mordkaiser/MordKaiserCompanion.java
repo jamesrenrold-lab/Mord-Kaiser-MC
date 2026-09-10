@@ -247,7 +247,7 @@ public final class MordKaiserCompanion {
             return;
         }
 
-        LivingEntity target = session.target;
+        LivingEntity target = resolveDomainTarget(player.getServer(), session);
         if (target == null || target.isRemoved() || !target.isAlive()) {
             finishDomain(player, session, "Realm of Death released: target defeated.");
             return;
@@ -291,7 +291,8 @@ public final class MordKaiserCompanion {
         removeDomainModifiers(player);
         MinecraftServer server = player.getServer();
         if (server == null) return;
-        if (session.target == null || session.target.isRemoved() || !session.target.isAlive()) {
+        LivingEntity target = resolveDomainTarget(server, session);
+        if (target == null || target.isRemoved() || !target.isAlive()) {
             transferDomainLoot(server, session);
         } else {
             returnDomainTarget(server, session);
@@ -585,6 +586,26 @@ public final class MordKaiserCompanion {
         if (attribute != null) attribute.removeModifier(id);
     }
 
+    private static LivingEntity resolveDomainTarget(MinecraftServer server, DomainSession session) {
+        if (session == null) return null;
+        LivingEntity current = session.target;
+        if (current != null && !current.isRemoved()
+                && current.level().dimension() == DOMAIN_KEY) {
+            return current;
+        }
+        if (server != null) {
+            ServerLevel domain = server.getLevel(DOMAIN_KEY);
+            if (domain != null) {
+                Entity rebound = domain.getEntity(session.targetId);
+                if (rebound instanceof LivingEntity living && !living.isRemoved()) {
+                    session.target = living;
+                    return living;
+                }
+            }
+        }
+        return current;
+    }
+
     private static void finishDomain(ServerPlayer player, DomainSession session, String message) {
         if (!DOMAIN_SESSIONS.remove(session.playerId, session)) return;
         stopDomainLoop(player);
@@ -592,7 +613,8 @@ public final class MordKaiserCompanion {
         MinecraftServer server = player.getServer();
         if (server == null) return;
 
-        if (session.target == null || session.target.isRemoved() || !session.target.isAlive()) {
+        LivingEntity target = resolveDomainTarget(server, session);
+        if (target == null || target.isRemoved() || !target.isAlive()) {
             transferDomainLoot(server, session);
         } else {
             returnDomainTarget(server, session);
@@ -645,7 +667,7 @@ public final class MordKaiserCompanion {
     }
 
     private static void returnDomainTarget(MinecraftServer server, DomainSession session) {
-        LivingEntity target = session.target;
+        LivingEntity target = resolveDomainTarget(server, session);
         if (target == null || target.isRemoved() || !target.isAlive()) return;
         ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
         if (destination == null) return;
@@ -663,15 +685,12 @@ public final class MordKaiserCompanion {
         ServerLevel sourceLevel = source.level() instanceof ServerLevel serverLevel ? serverLevel : null;
         if (sourceLevel == null) return null;
         UUID sourceId = source.getUUID();
-        double originalX = source.getX();
-        double originalY = source.getY();
-        double originalZ = source.getZ();
-        float originalYaw = source.getYRot();
-        float originalPitch = source.getXRot();
         CompoundTag snapshot = new CompoundTag();
         if (!source.save(snapshot)) return null;
         snapshot.putUUID("UUID", sourceId);
-        source.discard();
+        // Keep the target persistent for the duel and do not remove the original
+        // until the recreated entity has been accepted by the destination level.
+        snapshot.putBoolean("PersistenceRequired", true);
 
         Entity recreated = EntityType.loadEntityRecursive(snapshot, destination, entity -> {
             entity.setUUID(sourceId);
@@ -680,16 +699,16 @@ public final class MordKaiserCompanion {
             return entity;
         });
         if (recreated instanceof LivingEntity living && destination.addWithUUID(living)) {
+            if (living instanceof net.minecraft.world.entity.Mob mob) {
+                mob.setPersistenceRequired();
+            }
+            source.discard();
             return living;
         }
-
-        Entity restored = EntityType.loadEntityRecursive(snapshot, sourceLevel, entity -> {
-            entity.setUUID(sourceId);
-            entity.moveTo(originalX, originalY, originalZ, originalYaw, originalPitch);
-            entity.setDeltaMovement(Vec3.ZERO);
-            return entity;
-        });
-        if (restored != null) sourceLevel.addWithUUID(restored);
+        if (recreated != null && !recreated.isRemoved()) {
+            recreated.discard();
+        }
+        // The original remains in place if serialization or destination insertion fails.
         return null;
     }
 
