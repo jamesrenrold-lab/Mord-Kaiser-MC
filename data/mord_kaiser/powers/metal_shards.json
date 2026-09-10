@@ -1,7 +1,7 @@
 {
   "type": "origins:active_self",
   "name": "§7Metal Shards",
-  "description": "For 15 seconds, enemies within 3 blocks take small periodic physical damage. A cyan ring marks the affected area. Gain +3 armor and +10% armor. Cooldown: 45 seconds.",
+  "description": "For 15 seconds, enemies within 5 blocks take small periodic physical damage. A cyan ring marks the affected area. Gain +3 armor and +10% armor. Cooldown: 45 seconds.",
   "cooldown": 900,
   "hud_render": {
     "should_render": true,
