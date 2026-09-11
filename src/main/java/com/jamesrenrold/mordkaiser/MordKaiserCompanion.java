@@ -44,6 +44,8 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.Event;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -69,6 +71,9 @@ public final class MordKaiserCompanion {
     private static final String MACE_HUD = "MordMaceHud";
     private static final String MACE_COOLDOWN = "MordMaceCooldown";
     private static final String MACE_RECHARGE_START = "MordMaceRechargeStart";
+    // Short grace period after an empowered hit so Epic Fight cannot cancel its recovery.
+    private static final String MACE_UNSTOPPABLE_UNTIL = "MordMaceUnstoppableUntil";
+    private static final int MACE_UNSTOPPABLE_WINDOW_TICKS = 12;
     private static final String SHIELD_COOLDOWN = "MordShieldCooldown";
     private static final String METAL_UNTIL = "MordMetalUntil";
     private static final String METAL_COOLDOWN = "MordMetalCooldown";
@@ -321,6 +326,8 @@ public final class MordKaiserCompanion {
             if (charges > 0) {
                 double spellPower = getSpellPower(player);
                 event.setAmount(event.getAmount() + (float) (spellPower * 0.30D));
+                getData(player).putLong(MACE_UNSTOPPABLE_UNTIL,
+                        player.serverLevel().getGameTime() + MACE_UNSTOPPABLE_WINDOW_TICKS);
                 charges--;
                 getData(player).putInt(MACE_CHARGES, charges);
                 syncMaceResource(player, charges);
@@ -338,6 +345,32 @@ public final class MordKaiserCompanion {
         }
 
         addSoulDamage(player, event.getAmount());
+    }
+
+    /**
+     * Epic Fight posts a cancelable EntityStunEvent before applying hit animation
+     * and knockback. Handle it reflectively so Epic Fight remains an optional
+     * dependency while still granting Mace of Spades hyper-armor when present.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onEpicFightStun(Event event) {
+        if (!"yesman.epicfight.api.forgeevent.EntityStunEvent".equals(event.getClass().getName())) return;
+
+        try {
+            Object patch = event.getClass().getMethod("getStunnedEntityPatch").invoke(event);
+            if (patch == null) return;
+            Object original = patch.getClass().getMethod("getOriginal").invoke(patch);
+            if (!(original instanceof ServerPlayer player) || !isMord(player)) return;
+
+            var data = getData(player);
+            long now = player.serverLevel().getGameTime();
+            if (data.getInt(MACE_CHARGES) > 0
+                    || data.getLong(MACE_UNSTOPPABLE_UNTIL) > now) {
+                event.setCanceled(true);
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            // Older or incompatible Epic Fight builds simply leave their normal stun behavior.
+        }
     }
 
     @SubscribeEvent
