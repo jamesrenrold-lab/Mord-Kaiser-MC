@@ -1,5 +1,5 @@
 {
-  "type": "mord_kaiser:mord_domain",
+  "type": "minecraft:overworld",
   "generator": {
     "type": "minecraft:flat",
     "settings": {
