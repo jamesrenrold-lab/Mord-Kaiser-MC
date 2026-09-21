@@ -466,7 +466,8 @@ public final class MordKaiserCompanion {
         buildArenaCage(domain, arenaX, floorTop);
 
         LivingEntity domainTarget = transferDomainTarget(target, domain, arenaX, arenaY, 7.0D, 180.0F, 0.0F);
-        if (domainTarget == null || domainTarget.isRemoved() || !domainTarget.isAlive()) {
+        if (domainTarget == null || domainTarget.isRemoved() || !domainTarget.isAlive()
+                || domainTarget.level().dimension() != DOMAIN_KEY) {
             removeArenaCage(domain, arenaX, floorTop);
             player.displayClientMessage(Component.literal("Realm of Death failed to move the target.")
                     .withStyle(ChatFormatting.DARK_RED), true);
@@ -762,7 +763,7 @@ public final class MordKaiserCompanion {
         if (source instanceof ServerPlayer player) {
             player.teleportTo(destination, x, y, z, yaw, pitch);
             player.setDeltaMovement(Vec3.ZERO);
-            return player;
+            return player.level().dimension() == destination.dimension() ? player : null;
         }
         return transferLivingEntity(source, destination, x, y, z, yaw, pitch);
     }
