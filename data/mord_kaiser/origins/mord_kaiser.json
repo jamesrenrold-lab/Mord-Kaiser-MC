@@ -16,6 +16,7 @@
     "mord_kaiser:metal_shards",
     "mord_kaiser:death_grasp",
     "mord_kaiser:indestructible",
-    "mord_kaiser:realm_of_death"
+    "mord_kaiser:realm_of_death",
+    "mord_kaiser:realm_of_death_cooldown"
   ]
 }
