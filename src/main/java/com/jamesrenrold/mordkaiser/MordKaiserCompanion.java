@@ -93,6 +93,8 @@ public final class MordKaiserCompanion {
     private static final ResourceKey<Level> DOMAIN_KEY =
             ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
     private static final int DOMAIN_DURATION_TICKS = 20 * 60;
+    // Keep the arena open briefly after the target dies so the return feels seamless.
+    private static final int DOMAIN_DEATH_GRACE_TICKS = 50;
     private static final int DOMAIN_WINDUP_TICKS = 23;
     // Start the ~55-second domain track five seconds after entry; the domain ends before a restart is needed.
     private static final int DOMAIN_SOUND_DELAY_TICKS = 100;
@@ -164,6 +166,7 @@ public final class MordKaiserCompanion {
         final int arenaFloorTop;
         LivingEntity target;
         int ticksRemaining = DOMAIN_DURATION_TICKS;
+        int deathGraceTicksRemaining = -1;
         int soundTicksUntilNext = DOMAIN_SOUND_DELAY_TICKS;
         int lastDisplayedSecond = Integer.MIN_VALUE;
 
@@ -254,7 +257,19 @@ public final class MordKaiserCompanion {
 
         LivingEntity target = resolveDomainTarget(player.getServer(), session);
         if (target == null || target.isRemoved() || !target.isAlive()) {
-            finishDomain(player, session, "Realm of Death released: target defeated.");
+            // Do not tear down the arena on the same tick the target dies. Hold the
+            // player in the domain for a short transition so death effects, loot,
+            // and the return teleport are not perceived as an abrupt cutoff.
+            if (session.deathGraceTicksRemaining < 0) {
+                session.deathGraceTicksRemaining = DOMAIN_DEATH_GRACE_TICKS;
+                session.lastDisplayedSecond = Integer.MIN_VALUE;
+            }
+            session.deathGraceTicksRemaining--;
+            if (session.deathGraceTicksRemaining <= 0) {
+                finishDomain(player, session, "Realm of Death released: target defeated.");
+            } else {
+                updateDomainCountdown(player, session);
+            }
             return;
         }
         if (target.level().dimension() != DOMAIN_KEY) {
@@ -570,10 +585,14 @@ public final class MordKaiserCompanion {
     }
 
     private static void updateDomainCountdown(ServerPlayer player, DomainSession session) {
-        int seconds = Math.max(0, (session.ticksRemaining + 19) / 20);
+        int remainingTicks = session.deathGraceTicksRemaining >= 0
+                ? session.deathGraceTicksRemaining : session.ticksRemaining;
+        int seconds = Math.max(0, (remainingTicks + 19) / 20);
         if (seconds == session.lastDisplayedSecond) return;
         session.lastDisplayedSecond = seconds;
-        String json = "{\"text\":\"Realm of Death: " + seconds
+        String label = session.deathGraceTicksRemaining >= 0
+                ? "Realm of Death transition: " : "Realm of Death: ";
+        String json = "{\"text\":\"" + label + seconds
                 + "s\",\"color\":\"dark_red\",\"bold\":true}";
         player.getServer().getCommands().performPrefixedCommand(
                 player.createCommandSourceStack().withPermission(2).withSuppressedOutput(),
