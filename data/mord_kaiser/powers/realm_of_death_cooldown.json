@@ -1,0 +1,14 @@
+{
+  "type": "origins:resource",
+  "name": "§4Realm of Death Cooldown",
+  "description": "Four-minute cooldown. It starts only after a target is successfully pulled into the realm.",
+  "min": 0,
+  "max": 4800,
+  "start_value": 0,
+  "hud_render": {
+    "should_render": true,
+    "sprite_location": "mord_kaiser:textures/gui/realm_of_death.png",
+    "bar_index": 0,
+    "icon_index": 0
+  }
+}
