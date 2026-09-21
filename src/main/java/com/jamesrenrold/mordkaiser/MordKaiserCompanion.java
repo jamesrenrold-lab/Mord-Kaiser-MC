@@ -78,6 +78,8 @@ public final class MordKaiserCompanion {
     private static final String METAL_UNTIL = "MordMetalUntil";
     private static final String METAL_COOLDOWN = "MordMetalCooldown";
     private static final String GRASP_COOLDOWN = "MordGraspCooldown";
+    private static final String DOMAIN_COOLDOWN = "MordDomainCooldown";
+    private static final String DOMAIN_HUD = "MordDomainHud";
 
     private static final int SOUL_RESOURCE_MAX = 100;
     private static final int MACE_MAX = 3;
@@ -93,6 +95,7 @@ public final class MordKaiserCompanion {
     private static final ResourceKey<Level> DOMAIN_KEY =
             ResourceKey.create(Registries.DIMENSION, new ResourceLocation(MOD_ID, "mord_domain"));
     private static final int DOMAIN_DURATION_TICKS = 20 * 60;
+    private static final long DOMAIN_COOLDOWN_TICKS = 4800L;
     // Keep the arena open briefly after the target dies so the return feels seamless.
     private static final int DOMAIN_DEATH_GRACE_TICKS = 50;
     private static final int DOMAIN_WINDUP_TICKS = 23;
@@ -399,6 +402,7 @@ public final class MordKaiserCompanion {
             if (!isMord(player)) continue;
             syncSoulResource(player);
             syncMaceRecharge(player, now);
+            syncDomainCooldown(player, now);
             long metalUntil = getData(player).getLong(METAL_UNTIL);
             if (metalUntil > now) {
                 ensureArmorModifiers(player);
@@ -419,15 +423,25 @@ public final class MordKaiserCompanion {
         }
 
         MinecraftServer server = player.getServer();
-        if (server == null || server.getLevel(DOMAIN_KEY) == null) {
+        if (server == null) return 0;
+        long now = server.overworld().getGameTime();
+        long cooldownEnd = getData(player).getLong(DOMAIN_COOLDOWN);
+        if (cooldownEnd > now) {
+            long remaining = cooldownEnd - now;
+            player.displayClientMessage(Component.literal("Realm of Death is cooling down ("
+                    + ((remaining + 19L) / 20L) + "s).")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+            return 0;
+        }
+        if (server.getLevel(DOMAIN_KEY) == null) {
             player.displayClientMessage(Component.literal("Realm of Death failed: mord_kaiser:mord_domain is not loaded.")
                     .withStyle(ChatFormatting.DARK_RED), true);
             return 0;
         }
 
-        LivingEntity target = findHostileCrosshairTarget(player);
+        LivingEntity target = findDomainCrosshairTarget(player);
         if (target == null) {
-            player.displayClientMessage(Component.literal("Aim directly at a hostile mob within 40 blocks.")
+            player.displayClientMessage(Component.literal("Aim directly at a hostile mob or another player within 40 blocks.")
                     .withStyle(ChatFormatting.DARK_RED), true);
             return 0;
         }
@@ -451,7 +465,7 @@ public final class MordKaiserCompanion {
         double arenaY = floorTop + 1.0D;
         buildArenaCage(domain, arenaX, floorTop);
 
-        LivingEntity domainTarget = transferLivingEntity(target, domain, arenaX, arenaY, 7.0D, 180.0F, 0.0F);
+        LivingEntity domainTarget = transferDomainTarget(target, domain, arenaX, arenaY, 7.0D, 180.0F, 0.0F);
         if (domainTarget == null || domainTarget.isRemoved() || !domainTarget.isAlive()) {
             removeArenaCage(domain, arenaX, floorTop);
             player.displayClientMessage(Component.literal("Realm of Death failed to move the target.")
@@ -463,6 +477,13 @@ public final class MordKaiserCompanion {
         DomainSession session = new DomainSession(player.getUUID(), pending.targetId, pending.playerOrigin,
                 pending.targetOrigin, domainTarget, arenaX, floorTop);
         DOMAIN_SESSIONS.put(player.getUUID(), session);
+        long cooldownStart = server.overworld().getGameTime();
+        getData(player).putLong(DOMAIN_COOLDOWN, cooldownStart + DOMAIN_COOLDOWN_TICKS);
+        syncDomainCooldown(player, cooldownStart);
+        if (domainTarget instanceof ServerPlayer targetPlayer && targetPlayer != player) {
+            targetPlayer.displayClientMessage(Component.literal("Realm of Death: you have been pulled into a duel.")
+                    .withStyle(ChatFormatting.DARK_RED), true);
+        }
         player.teleportTo(domain, arenaX, arenaY, -7.0D, 0.0F, 0.0F);
         player.setDeltaMovement(Vec3.ZERO);
         domain.playSound(null, player.blockPosition(), SoundEvents.END_PORTAL_SPAWN,
@@ -483,21 +504,25 @@ public final class MordKaiserCompanion {
         return 1;
     }
 
-    private static LivingEntity findHostileCrosshairTarget(ServerPlayer player) {
+    private static LivingEntity findDomainCrosshairTarget(ServerPlayer player) {
         Vec3 start = player.getEyePosition();
         Vec3 look = player.getLookAngle();
         Vec3 end = start.add(look.scale(DOMAIN_TARGET_RANGE));
         AABB search = player.getBoundingBox().expandTowards(look.scale(DOMAIN_TARGET_RANGE)).inflate(1.0D);
         EntityHitResult hit = ProjectileUtil.getEntityHitResult(player, start, end, search,
                 entity -> entity instanceof LivingEntity living
-                        && entity != player
-                        && entity.isPickable()
-                        && entity.isAlive()
-                        && isHostile(living)
-                        && !living.getTags().contains(ORIGIN_TAG),
+                        && isDomainTarget(player, living),
                 DOMAIN_TARGET_RANGE * DOMAIN_TARGET_RANGE);
         if (hit == null || !(hit.getEntity() instanceof LivingEntity living)) return null;
         return player.hasLineOfSight(living) ? living : null;
+    }
+
+    private static boolean isDomainTarget(ServerPlayer caster, LivingEntity living) {
+        if (living == caster || !living.isPickable() || !living.isAlive()) return false;
+        if (living instanceof ServerPlayer otherPlayer) {
+            return otherPlayer != caster;
+        }
+        return isHostile(living) && !living.getTags().contains(ORIGIN_TAG);
     }
 
     private static boolean isHostile(LivingEntity living) {
@@ -692,7 +717,8 @@ public final class MordKaiserCompanion {
                 session.arenaFloorTop + ARENA_WALL_HEIGHT, ARENA_HALF_SIZE + 1);
         ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
         for (Entity entity : new ArrayList<>(domain.getEntities((Entity) null, arena, Entity::isAlive))) {
-            if (entity instanceof ServerPlayer serverPlayer && serverPlayer.getUUID().equals(session.playerId)) continue;
+            // Never discard a player who happens to be present in the arena.
+            if (entity instanceof ServerPlayer) continue;
             if (entity.getUUID().equals(session.targetId)) continue;
             if ((entity instanceof ItemEntity || entity instanceof ExperienceOrb) && destination != null) {
                 transferLooseEntity(entity, destination, session.targetOrigin.x, session.targetOrigin.y, session.targetOrigin.z);
@@ -723,12 +749,22 @@ public final class MordKaiserCompanion {
         if (target == null || target.isRemoved() || !target.isAlive()) return;
         ServerLevel destination = server.getLevel(session.targetOrigin.dimension);
         if (destination == null) return;
-        LivingEntity returned = transferLivingEntity(target, destination, session.targetOrigin.x,
+        LivingEntity returned = transferDomainTarget(target, destination, session.targetOrigin.x,
                 session.targetOrigin.y, session.targetOrigin.z, session.targetOrigin.yaw, session.targetOrigin.pitch);
         if (returned != null) {
             returned.setDeltaMovement(Vec3.ZERO);
             session.target = returned;
         }
+    }
+
+    private static LivingEntity transferDomainTarget(LivingEntity source, ServerLevel destination,
+                                                        double x, double y, double z, float yaw, float pitch) {
+        if (source instanceof ServerPlayer player) {
+            player.teleportTo(destination, x, y, z, yaw, pitch);
+            player.setDeltaMovement(Vec3.ZERO);
+            return player;
+        }
+        return transferLivingEntity(source, destination, x, y, z, yaw, pitch);
     }
 
     private static LivingEntity transferLivingEntity(LivingEntity source, ServerLevel destination,
@@ -942,6 +978,16 @@ public final class MordKaiserCompanion {
         double stored = Math.min(cap, Math.max(0.0D, data.getDouble(SOUL_DAMAGE)) + damage);
         data.putDouble(SOUL_DAMAGE, stored);
         syncSoulResource(player);
+    }
+
+    private static void syncDomainCooldown(ServerPlayer player, long now) {
+        var data = getData(player);
+        long cooldownEnd = data.getLong(DOMAIN_COOLDOWN);
+        long remaining = Math.max(0L, cooldownEnd - now);
+        int value = (int) Math.min(DOMAIN_COOLDOWN_TICKS, remaining);
+        if (data.getInt(DOMAIN_HUD) == value) return;
+        data.putInt(DOMAIN_HUD, value);
+        runResourceCommand(player, "mord_kaiser:realm_of_death_cooldown", value);
     }
 
     private static void syncSoulResource(ServerPlayer player) {
